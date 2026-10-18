@@ -3,150 +3,160 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>GPS Táctico - Syntro</title>
+  <title>GPS Táctico de Campo - Syntro</title>
   
   <!-- Leaflet CSS y JS -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  
-  <!-- Leaflet Draw para Puntos y Polígonos -->
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
 
   <style>
     body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; }
     #map { height: 100vh; width: 100vw; }
     
-    /* Panel Flotante Minimalista */
+    /* Panel de Control Flotante para Campo */
     .controls-panel {
       position: absolute;
-      bottom: 20px;
+      bottom: 25px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 1000;
       background: rgba(255, 255, 255, 0.95);
-      padding: 12px 20px;
-      border-radius: 30px;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      padding: 10px 15px;
+      border-radius: 25px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
       display: flex;
-      gap: 10px;
+      gap: 8px;
       align-items: center;
+      flex-wrap: wrap;
+      justify-content: center;
     }
 
-    .btn-gps {
-      background: #2e7d32;
-      color: white;
+    button {
       border: none;
-      padding: 10px 16px;
-      border-radius: 20px;
+      padding: 10px 14px;
+      border-radius: 18px;
       font-weight: bold;
-      font-size: 14px;
+      font-size: 13px;
       cursor: pointer;
+      color: white;
     }
 
-    .btn-export {
-      background: #1565c0;
-      color: white;
-      border: none;
-      padding: 10px 16px;
-      border-radius: 20px;
-      font-weight: bold;
-      font-size: 14px;
-      cursor: pointer;
-    }
+    .btn-punto { background: #2e7d32; }
+    .btn-track { background: #e65100; }
+    .btn-stop { background: #c62828; }
+    .btn-export { background: #1565c0; }
   </style>
 </head>
 <body>
 
   <div id="map"></div>
 
-  <!-- Controles sencillos para campo -->
+  <!-- Botones de Acción Rápida en Pantalla -->
   <div class="controls-panel">
-    <button class="btn-gps" onclick="centrarGPS()">📍 Mi Ubicación</button>
-    <button class="btn-export" onclick="exportarGeoJSON()">📥 Descargar GeoJSON</button>
+    <button class="btn-punto" onclick="marcarPuntoGPS()">📍 Marcar Punto</button>
+    <button class="btn-track" id="btnTrack" onclick="toggleTracking()">🟢 Iniciar Polígono GPS</button>
+    <button class="btn-export" onclick="exportarGeoJSON()">📥 GeoJSON</button>
   </div>
 
   <script>
-    // 1. Inicializar mapa
-    const map = L.map('map').setView([10.0, -71.5], 15);
+    // 1. Inicializar Mapa
+    const map = L.map('map').setView([10.0, -71.5], 16);
 
-    // 2. Capa base Google Satélite
+    // Capa Satelital base
     const googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      maxZoom: 20,
       attribution: 'Google Satélite'
     }).addTo(map);
 
-    // Capa Esri World Imagery alternativa
-    const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-      attribution: 'Esri World Imagery'
-    });
-
-    L.control.layers({
-      "Google Satélite": googleSat,
-      "Esri Satélite": esriSat
-    }).addTo(map);
-
-    // 3. Capa para almacenar los dibuos
+    // Contenedor de geometrías dibujadas
     const drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
 
-    // 4. Herramienta de dibujo (Puntos y Polígonos)
-    const drawControl = new L.Control.Draw({
-      position: 'topright',
-      draw: {
-        polyline: false,
-        circle: false,
-        circlemarker: false,
-        rectangle: false,
-        marker: true,
-        polygon: {
-          allowIntersection: false,
-          showArea: true
-        }
-      },
-      edit: {
-        featureGroup: drawnItems
-      }
-    });
-    map.addControl(drawControl);
+    let trackingActive = sessionStorage.getItem('tracking') === 'true';
+    let currentPolygonCoords = [];
+    let trackingLine = null;
+    let userMarker = null;
 
-    map.on(L.Draw.Event.CREATED, function (event) {
-      const layer = event.layer;
-      drawnItems.addLayer(layer);
-    });
-
-    // 5. Geolocalización en tiempo real
-    let userMarker;
-    function centrarGPS() {
-      map.locate({setView: true, maxZoom: 18, enableHighAccuracy: true});
-    }
+    // 2. Obtener posición GPS continua del teléfono
+    map.locate({setView: true, watch: true, maxZoom: 18, enableHighAccuracy: true});
 
     map.on('locationfound', function(e) {
-      if (userMarker) map.removeLayer(userMarker);
-      userMarker = L.circleMarker(e.latlng, {
-        radius: 8,
-        fillColor: "#1e88e5",
-        color: "#ffffff",
-        weight: 3,
-        opacity: 1,
-        fillOpacity: 0.9
-      }).addTo(map);
+      const latlng = [e.latitude, e.longitude];
+      
+      // Actualizar marcador de posición actual en tiempo real
+      if (userMarker) {
+        userMarker.setLatLng(latlng);
+      } else {
+        userMarker = L.circleMarker(latlng, {
+          radius: 9,
+          fillColor: "#2196F3",
+          color: "#ffffff",
+          weight: 3,
+          fillOpacity: 1
+        }).addTo(map).bindPopup("Estás aquí (GPS Activo)").openPopup();
+      }
+
+      // Si el usuario activó el modo de captura de polígono caminando
+      if (trackingActive) {
+        currentPolygonCoords.push(latlng);
+        if (trackingLine) {
+          map.removeLayer(trackingLine);
+        }
+        trackingLine = L.polygon(currentPolygonCoords, {color: '#ff9800', weight: 4, fillColor: '#ff9800', fillOpacity: 0.3}).addTo(map);
+      }
     });
 
-    map.on('locationerror', function() {
-      alert("No se pudo obtener la ubicación GPS del dispositivo.");
+    map.on('locationerror', function(e) {
+      alert("Error de GPS: " + e.message + ". Asegúrate de dar permisos de ubicación al navegador.");
     });
 
-    // 6. Exportar directamente a formato GeoJSON
+    // 3. Función para registrar un Punto exacto donde estás parado
+    function marcarPuntoGPS() {
+      if (userMarker) {
+        const latlng = userMarker.getLatLng();
+        const marker = L.marker(latlng).bindPopup("Punto capturado por GPS");
+        drawnItems.addLayer(marker);
+        alert("¡Punto guardado con éxito!");
+      } else {
+        alert("Esperando señal GPS del dispositivo...");
+      }
+    }
+
+    // 4. Activar / Desactivar el rastreo para formar el Polígono al moverte
+    function toggleTracking() {
+      const btn = document.getElementById('btnTrack');
+      if (!trackingActive) {
+        trackingActive = true;
+        currentPolygonCoords = [];
+        btn.innerText = "🛑 Detener y Guardar Polígono";
+        btn.className = "btn-stop";
+        alert("Modo Polígono activado. Camina por el perímetro del terreno.");
+      } else {
+        trackingActive = false;
+        btn.innerText = "🟢 Iniciar Polígono GPS";
+        btn.className = "btn-track";
+        
+        if (currentPolygonCoords.length > 2) {
+          const finishedPolygon = L.polygon(currentPolygonCoords, {color: '#2e7d32', weight: 3, fillOpacity: 0.4});
+          drawnItems.addLayer(finishedPolygon);
+          alert("¡Polígono del terreno guardado correctamente!");
+        } else {
+          alert("No se recorrió suficiente distancia para formar un polígono.");
+        }
+      }
+    }
+
+    // 5. Exportar todo lo recolectado a archivo GeoJSON descargable
     function exportarGeoJSON() {
       const data = drawnItems.toGeoJSON();
       if (data.features.length === 0) {
-        alert("Primero dibuja un punto o polígono en el mapa.");
+        alert("No hay puntos ni polígonos registrados todavía.");
         return;
       }
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", "levantamiento_campo.geojson");
+      downloadAnchor.setAttribute("download", "levantamiento_campo_syntro.geojson");
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
