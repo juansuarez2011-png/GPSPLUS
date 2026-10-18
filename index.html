@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>GPS Táctico - Syntro</title>
+  
+  <!-- Leaflet CSS y JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- Leaflet Draw para Puntos y Polígonos -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.js"></script>
+
+  <style>
+    body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; }
+    #map { height: 100vh; width: 100vw; }
+    
+    /* Panel Flotante Minimalista */
+    .controls-panel {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 1000;
+      background: rgba(255, 255, 255, 0.95);
+      padding: 12px 20px;
+      border-radius: 30px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .btn-gps {
+      background: #2e7d32;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .btn-export {
+      background: #1565c0;
+      color: white;
+      border: none;
+      padding: 10px 16px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 14px;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body>
+
+  <div id="map"></div>
+
+  <!-- Controles sencillos para campo -->
+  <div class="controls-panel">
+    <button class="btn-gps" onclick="centrarGPS()">📍 Mi Ubicación</button>
+    <button class="btn-export" onclick="exportarGeoJSON()">📥 Descargar GeoJSON</button>
+  </div>
+
+  <script>
+    // 1. Inicializar mapa
+    const map = L.map('map').setView([10.0, -71.5], 15);
+
+    // 2. Capa base Google Satélite
+    const googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
+      attribution: 'Google Satélite'
+    }).addTo(map);
+
+    // Capa Esri World Imagery alternativa
+    const esriSat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      attribution: 'Esri World Imagery'
+    });
+
+    L.control.layers({
+      "Google Satélite": googleSat,
+      "Esri Satélite": esriSat
+    }).addTo(map);
+
+    // 3. Capa para almacenar los dibuos
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+
+    // 4. Herramienta de dibujo (Puntos y Polígonos)
+    const drawControl = new L.Control.Draw({
+      position: 'topright',
+      draw: {
+        polyline: false,
+        circle: false,
+        circlemarker: false,
+        rectangle: false,
+        marker: true,
+        polygon: {
+          allowIntersection: false,
+          showArea: true
+        }
+      },
+      edit: {
+        featureGroup: drawnItems
+      }
+    });
+    map.addControl(drawControl);
+
+    map.on(L.Draw.Event.CREATED, function (event) {
+      const layer = event.layer;
+      drawnItems.addLayer(layer);
+    });
+
+    // 5. Geolocalización en tiempo real
+    let userMarker;
+    function centrarGPS() {
+      map.locate({setView: true, maxZoom: 18, enableHighAccuracy: true});
+    }
+
+    map.on('locationfound', function(e) {
+      if (userMarker) map.removeLayer(userMarker);
+      userMarker = L.circleMarker(e.latlng, {
+        radius: 8,
+        fillColor: "#1e88e5",
+        color: "#ffffff",
+        weight: 3,
+        opacity: 1,
+        fillOpacity: 0.9
+      }).addTo(map);
+    });
+
+    map.on('locationerror', function() {
+      alert("No se pudo obtener la ubicación GPS del dispositivo.");
+    });
+
+    // 6. Exportar directamente a formato GeoJSON
+    function exportarGeoJSON() {
+      const data = drawnItems.toGeoJSON();
+      if (data.features.length === 0) {
+        alert("Primero dibuja un punto o polígono en el mapa.");
+        return;
+      }
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", "levantamiento_campo.geojson");
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+  </script>
+</body>
+</html>
