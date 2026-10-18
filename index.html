@@ -10,10 +10,10 @@
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
   <style>
-    body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; }
+    body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; overflow: hidden; }
     #map { height: 100vh; width: 100vw; }
     
-    /* Panel de Control Flotante para Campo */
+    /* Panel de Control Flotante */
     .controls-panel {
       position: absolute;
       bottom: 25px;
@@ -21,11 +21,11 @@
       transform: translateX(-50%);
       z-index: 1000;
       background: rgba(255, 255, 255, 0.95);
-      padding: 10px 15px;
+      padding: 12px 18px;
       border-radius: 25px;
       box-shadow: 0 4px 15px rgba(0,0,0,0.4);
       display: flex;
-      gap: 8px;
+      gap: 10px;
       align-items: center;
       flex-wrap: wrap;
       justify-content: center;
@@ -33,10 +33,10 @@
 
     button {
       border: none;
-      padding: 10px 14px;
+      padding: 12px 16px;
       border-radius: 18px;
       font-weight: bold;
-      font-size: 13px;
+      font-size: 14px;
       cursor: pointer;
       color: white;
     }
@@ -51,112 +51,142 @@
 
   <div id="map"></div>
 
-  <!-- Botones de Acción Rápida en Pantalla -->
+  <!-- Botones de Acción -->
   <div class="controls-panel">
     <button class="btn-punto" onclick="marcarPuntoGPS()">📍 Marcar Punto</button>
-    <button class="btn-track" id="btnTrack" onclick="toggleTracking()">🟢 Iniciar Polígono GPS</button>
+    <button class="btn-track" id="btnTrack" onclick="toggleTracking()">🟢 Iniciar Polígono</button>
     <button class="btn-export" onclick="exportarGeoJSON()">📥 GeoJSON</button>
   </div>
 
   <script>
-    // 1. Inicializar Mapa
-    const map = L.map('map').setView([10.0, -71.5], 16);
+    // 1. Inicializar Mapa (Vista preliminar)
+    const map = L.map('map', {zoomControl: false}).setView([10.0, -71.5], 17);
 
-    // Capa Satelital base
+    // Control de zoom a la derecha para comodidad móvil
+    L.control.zoom({position: 'topright'}).addTo(map);
+
+    // Capa Satelital de Google
     const googleSat = L.tileLayer('https://mt1.google.com/vt/lyrs=s&x={x}&y={y}&z={z}', {
-      maxZoom: 20,
+      maxZoom: 21,
+      maxNativeZoom: 20,
       attribution: 'Google Satélite'
     }).addTo(map);
 
-    // Contenedor de geometrías dibujadas
     const drawnItems = new L.FeatureGroup();
     map.addLayer(drawnItems);
 
-    let trackingActive = sessionStorage.getItem('tracking') === 'true';
+    let trackingActive = false;
     let currentPolygonCoords = [];
     let trackingLine = null;
     let userMarker = null;
+    let firstFix = true;
 
-    // 2. Obtener posición GPS continua del teléfono
-    map.locate({setView: true, watch: true, maxZoom: 18, enableHighAccuracy: true});
+    // 2. Activar geolocalización en tiempo real con alta frecuencia (WatchPosition nativo)
+    if (navigator.geolocation) {
+      navigator.geolocation.watchPosition(
+        function(position) {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const latlng = [lat, lng];
 
-    map.on('locationfound', function(e) {
-      const latlng = [e.latitude, e.longitude];
-      
-      // Actualizar marcador de posición actual en tiempo real
-      if (userMarker) {
-        userMarker.setLatLng(latlng);
-      } else {
-        userMarker = L.circleMarker(latlng, {
-          radius: 9,
-          fillColor: "#2196F3",
-          color: "#ffffff",
-          weight: 3,
-          fillOpacity: 1
-        }).addTo(map).bindPopup("Estás aquí (GPS Activo)").openPopup();
-      }
+          // Actualizar o crear el marcador azul en la posición exacta
+          if (userMarker) {
+            userMarker.setLatLng(latlng);
+          } else {
+            userMarker = L.circleMarker(latlng, {
+              radius: 10,
+              fillColor: "#2196F3",
+              color: "#ffffff",
+              weight: 3,
+              fillOpacity: 1
+            }).addTo(map);
+          }
 
-      // Si el usuario activó el modo de captura de polígono caminando
-      if (trackingActive) {
-        currentPolygonCoords.push(latlng);
-        if (trackingLine) {
-          map.removeLayer(trackingLine);
+          // **EL TRUCO CLAVE**: Forzar al mapa a centrarse automáticamente en ti al moverte
+          if (firstFix || trackingActive) {
+            map.setView(latlng, 18); // Ajusta el zoom de seguimiento automático
+            firstFix = false;
+          }
+
+          // Si estás grabando el polígono caminando, agregar coordenada en tiempo real
+          if (trackingActive) {
+            currentPolygonCoords.push(latlng);
+            if (trackingLine) {
+              map.removeLayer(trackingLine);
+            }
+            trackingLine = L.polygon(currentPolygonCoords, {
+              color: '#ff9800', 
+              weight: 4, 
+              fillColor: '#ff9800', 
+              fillOpacity: 0.3
+            }).addTo(map);
+          }
+        },
+        function(error) {
+          console.warn("Error de GPS: " + error.message);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 0,
+          timeout: 10000
         }
-        trackingLine = L.polygon(currentPolygonCoords, {color: '#ff9800', weight: 4, fillColor: '#ff9800', fillOpacity: 0.3}).addTo(map);
-      }
-    });
+      );
+    } else {
+      alert("Tu navegador no soporta geolocalización GPS.");
+    }
 
-    map.on('locationerror', function(e) {
-      alert("Error de GPS: " + e.message + ". Asegúrate de dar permisos de ubicación al navegador.");
-    });
-
-    // 3. Función para registrar un Punto exacto donde estás parado
+    // 3. Registrar un Punto exacto
     function marcarPuntoGPS() {
       if (userMarker) {
         const latlng = userMarker.getLatLng();
-        const marker = L.marker(latlng).bindPopup("Punto capturado por GPS");
-        drawnItems.addLayer(marker);
+        const marker = L.marker(latlng).bindPopup("Punto GPS Registrado").addTo(drawnItems);
+        marker.openPopup();
         alert("¡Punto guardado con éxito!");
       } else {
-        alert("Esperando señal GPS del dispositivo...");
+        alert("Buscando señal de satélite GPS... espera un momento.");
       }
     }
 
-    // 4. Activar / Desactivar el rastreo para formar el Polígono al moverte
+    // 4. Iniciar / Detener el Polígono por recorrido
     function toggleTracking() {
       const btn = document.getElementById('btnTrack');
       if (!trackingActive) {
         trackingActive = true;
         currentPolygonCoords = [];
-        btn.innerText = "🛑 Detener y Guardar Polígono";
+        btn.innerText = "🛑 Guardar Polígono";
         btn.className = "btn-stop";
         alert("Modo Polígono activado. Camina por el perímetro del terreno.");
       } else {
         trackingActive = false;
-        btn.innerText = "🟢 Iniciar Polígono GPS";
+        btn.innerText = "🟢 Iniciar Polígono";
         btn.className = "btn-track";
         
         if (currentPolygonCoords.length > 2) {
-          const finishedPolygon = L.polygon(currentPolygonCoords, {color: '#2e7d32', weight: 3, fillOpacity: 0.4});
-          drawnItems.addLayer(finishedPolygon);
-          alert("¡Polígono del terreno guardado correctamente!");
+          const finishedPolygon = L.polygon(currentPolygonCoords, {
+            color: '#2e7d32', 
+            weight: 4, 
+            fillColor: '#4CAF50', 
+            fillOpacity: 0.4
+          }).addTo(drawnItems);
+          
+          alert("¡Polígono cerrado y guardado correctamente!");
         } else {
           alert("No se recorrió suficiente distancia para formar un polígono.");
         }
       }
     }
 
-    // 5. Exportar todo lo recolectado a archivo GeoJSON descargable
+    // 5. Descargar datos en GeoJSON
     function exportarGeoJSON() {
       const data = drawnItems.toGeoJSON();
       if (data.features.length === 0) {
-        alert("No hay puntos ni polígonos registrados todavía.");
+        alert("No hay elementos guardados todavía.");
         return;
       }
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(data));
       const downloadAnchor = document.createElement('a');
       downloadAnchor.setAttribute("href", dataStr);
-      downloadAnchor.setAttribute("download", "levantamiento_campo_syntro.geojson");
+      downloadAnchor.setAttribute("download", "levantamiento_syntro.geojson");
       document.body.appendChild(downloadAnchor);
       downloadAnchor.click();
       downloadAnchor.remove();
